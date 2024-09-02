@@ -1,0 +1,38 @@
+# Python-specific ignores
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.env
+*.DS_Store
+
+# Django-specific ignores
+db.sqlite3
+media/
+
+# Ignore Django migrations
+**/migrations/*
+!**/migrations/__init__.py
+
+# Ignore the local settings file if it exists
+local_settings.py
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+
+# Ignore Docker files
+*.log
+docker-compose.override.yml
+
+# Ignore node_modules if you're using React in the project
+node_modules/
