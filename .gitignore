@@ -36,3 +36,8 @@ docker-compose.override.yml
 
 # Ignore node_modules if you're using React in the project
 node_modules/
+
+../node/
+../postgres-db-repo/
+../react-app/
+../mongo/
