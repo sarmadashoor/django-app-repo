@@ -10,7 +10,8 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost 127.0.0.1 [::1]').split()
+# Allowing hosts provided in the environment variable or using defaults
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1]').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -21,7 +22,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'apps.example_app'
+    'apps.example_app',
 ]
 
 MIDDLEWARE = [
@@ -31,7 +32,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware'
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -54,26 +55,32 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB'),
-        'USER': os.getenv('POSTGRES_USER'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
-        'HOST': os.getenv('POSTGRES_HOST'),
-        'PORT': os.getenv('POSTGRES_PORT'),
-    },
-    'mongo': {
-        'ENGINE': 'djongo',
-        'NAME': 'my_mongo_db',
-        'ENFORCE_SCHEMA': False,
-        'CLIENT': {
-            'host': os.getenv('MONGO_HOST'),
-            'port': int(os.getenv('MONGO_PORT')),
-        },
+# Database configuration using environment variables
+DATABASE_ENGINE = os.getenv('DJANGO_DB', 'postgres')
+
+if DATABASE_ENGINE == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', 'default_db_name'),
+            'USER': os.getenv('POSTGRES_USER', 'default_user'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'default_password'),
+            'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
     }
-}
+elif DATABASE_ENGINE == 'mongo':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'djongo',
+            'NAME': 'my_mongo_db',
+            'ENFORCE_SCHEMA': False,
+            'CLIENT': {
+                'host': os.getenv('MONGO_HOST', 'localhost'),
+                'port': int(os.getenv('MONGO_PORT', '27017')),
+            },
+        }
+    }
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
