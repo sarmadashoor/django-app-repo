@@ -2,3 +2,4 @@ Django>=3.2,<4.0
 djangorestframework>=3.12,<4.0
 djongo==1.3.6         # For MongoDB integration
 psycopg2-binary>=2.9  # For PostgreSQL integration
+django-cors-headers
