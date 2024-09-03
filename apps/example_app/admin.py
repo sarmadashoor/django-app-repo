@@ -1,4 +1,6 @@
 from django.contrib import admin
-from .models import ExampleModel
+from .models import UserProfile, Message  # Import the correct models
 
-admin.site.register(ExampleModel)
+# Register the models with the admin site
+admin.site.register(UserProfile)
+admin.site.register(Message)

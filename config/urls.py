@@ -8,5 +8,5 @@ def home_view(request):
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('apps.example_app.urls')),
-    path('', home_view),  # Adding a root URL pattern
+    path('', home_view),
 ]
