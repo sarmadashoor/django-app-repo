@@ -32,14 +32,17 @@ COPY requirements.txt /django/
 # Install any dependencies specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the current directory contents into the container at /django
+# Copy the rest of the application code into the container at /django
 COPY . /django/
+
+# Make wait-for-it.sh executable
+RUN chmod +x /django/wait-for-it.sh
 
 # Expose port 8000 to the outside world
 EXPOSE 8000
 
-# Run the Django server
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Run the wait-for-it.sh script and then start the Django server
+CMD ["./wait-for-it.sh", "postgres:5432", "--", "python", "manage.py", "runserver", "0.0.0.0:8000"]
 
 
 --- manage.py ---
@@ -66,6 +69,338 @@ def main():
 if __name__ == '__main__':
     main()
 
+
+--- repo-content.xml ---
+<?xml version='1.0' encoding='utf-8'?>
+<repository><file><path>convert_file.py</path><content>import os
+
+def convert_to_utf8(root_dir):
+    for subdir, _, files in os.walk(root_dir):
+        for file in files:
+            file_path = os.path.join(subdir, file)
+            try:
+                with open(file_path, 'r', encoding='utf-16') as f:
+                    content = f.read()
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                print(f"Converted {file_path} to UTF-8.")
+            except UnicodeError:
+                print(f"Skipped {file_path} (not UTF-16).")
+
+if __name__ == "__main__":
+    root_dir = '.'  # Change this to the root directory of your project if necessary
+    convert_to_utf8(root_dir)
+</content></file><file><path>Dockerfile</path><content># Use an official Python runtime as a parent image
+FROM python:3.9-slim
+
+# Set the working directory inside the container
+WORKDIR /django
+
+# Copy the requirements file into the container at /django
+COPY requirements.txt /django/
+
+# Install any dependencies specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the current directory contents into the container at /django
+COPY . /django/
+
+# Expose port 8000 to the outside world
+EXPOSE 8000
+
+# Run the Django server
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+</content></file><file><path>manage.py</path><content>#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+</content></file><file><path>script.py</path><content>import os
+import xml.etree.ElementTree as ET
+
+# Define the directories and file types to skip
+skip_dirs = {'.git', 'venv', '__pycache__', 'cache'}
+skip_files = {'.gitignore', '.gitattributes'}
+
+# Define code file extensions and additional important file types to include
+code_extensions = {
+    '.py', '.js', '.html', '.css', '.java', '.c', '.cpp', '.go', '.ts', '.json', '.xml', '.yaml', '.yml',
+    '.sh', '.bat', '.ini', '.conf', '.cfg', '.env', '.properties', '.sql', '.md', '.rb', '.pl', '.php'
+}
+
+# Also include certain files by name, regardless of extension
+include_files = {'Dockerfile', 'Makefile', 'Vagrantfile', 'README', 'LICENSE', '.env'}
+
+# Create the XML root
+root = ET.Element("repository")
+
+def is_code_file(file_name):
+    # Check if the file has a recognized code-related extension or is in the include_files set
+    return any(file_name.endswith(ext) for ext in code_extensions) or file_name in include_files
+
+def add_to_xml_tree(parent, path, content):
+    file_element = ET.SubElement(parent, "file")
+    ET.SubElement(file_element, "path").text = path
+    ET.SubElement(file_element, "content").text = content
+
+def save_to_files(text_output, xml_output, base_directory):
+    # Save text output
+    text_file_path = os.path.join(base_directory, "repo-content.txt")
+    xml_file_path = os.path.join(base_directory, "repo-content.xml")
+
+    with open(text_file_path, 'w', encoding='utf-8') as f:
+        f.write(text_output)
+
+    # Save XML output
+    tree = ET.ElementTree(xml_output)
+    tree.write(xml_file_path, encoding='utf-8', xml_declaration=True)
+
+def generate_file_tree(directory, skip_dirs, skip_files):
+    file_tree = []
+    for root_dir, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]  # Skip unwanted directories
+        for file_name in files:
+            if file_name in skip_files or not is_code_file(file_name):
+                continue
+            file_path = os.path.relpath(os.path.join(root_dir, file_name), directory)
+            file_tree.append(file_path)
+    return file_tree
+
+def main():
+    # Use the directory where the script is located as the base directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    text_output = []
+
+    for root_dir, dirs, files in os.walk(current_dir):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]  # Skip unwanted directories
+
+        for file_name in files:
+            if file_name in skip_files or not is_code_file(file_name):
+                continue
+
+            file_path = os.path.relpath(os.path.join(root_dir, file_name), current_dir)
+            text_output.append(f"--- {file_path} ---\n")
+
+            with open(os.path.join(root_dir, file_name), 'r', encoding='utf-8') as f:
+                content = f.read()
+                text_output.append(content + "\n\n")
+                add_to_xml_tree(root, file_path, content)
+
+    # Generate the directory tree at the bottom of the file
+    file_tree = generate_file_tree(current_dir, skip_dirs, skip_files)
+    text_output.append("\n--- Directory Tree ---\n")
+    for path in file_tree:
+        text_output.append(path + "\n")
+
+    # Save the outputs in the current directory
+    save_to_files(''.join(text_output), root, current_dir)
+    print(f"Output saved to {os.path.join(current_dir, 'repo-content.txt')} and {os.path.join(current_dir, 'repo-content.xml')}")
+
+if __name__ == "__main__":
+    main()
+</content></file><file><path>.github\workflows\python-ci.yml</path><content>name: Python CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run tests
+      run: |
+        python manage.py test
+</content></file><file><path>apps\__init__.py</path><content /></file><file><path>apps\example_app\admin.py</path><content>from django.contrib import admin
+from .models import ExampleModel
+
+admin.site.register(ExampleModel)
+</content></file><file><path>apps\example_app\apps.py</path><content>from django.apps import AppConfig
+
+class ExampleAppConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.example_app'
+</content></file><file><path>apps\example_app\models.py</path><content>from django.db import models
+
+class ExampleModel(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+</content></file><file><path>apps\example_app\urls.py</path><content>from django.urls import path
+from .views import example_view
+
+urlpatterns = [
+    path('example/', example_view),
+]
+</content></file><file><path>apps\example_app\views.py</path><content>from django.http import JsonResponse
+
+def example_view(request):
+    return JsonResponse({'message': 'Hello, world!'})
+</content></file><file><path>apps\example_app\__init__.py</path><content /></file><file><path>config\asgi.py</path><content>"""
+ASGI config for the project.
+
+It exposes the ASGI callable as a module-level variable named `application`.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/3.2/howto/deployment/asgi/
+"""
+
+import os
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+
+application = get_asgi_application()
+</content></file><file><path>config\settings.py</path><content>import os
+from pathlib import Path
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
+
+# Allowing hosts provided in the environment variable or using defaults
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1]').split(',')
+
+# Application definition
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'rest_framework',
+    'apps.example_app',
+]
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'config.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+
+# Database configuration using environment variables
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('POSTGRES_DB', 'default_db_name'),
+        'USER': os.getenv('POSTGRES_USER', 'default_user'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'default_password'),
+        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+    },
+    'mongo': {
+        'ENGINE': 'djongo',
+        'NAME': 'my_mongo_db',
+        'ENFORCE_SCHEMA': False,
+        'CLIENT': {
+            'host': os.getenv('MONGO_HOST', 'localhost'),
+            'port': int(os.getenv('MONGO_PORT', '27017')),
+        },
+    }
+}
+
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = '/static/'
+
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+</content></file><file><path>config\urls.py</path><content>from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('apps.example_app.urls')),
+]
+</content></file><file><path>config\wsgi.py</path><content>"""
+WSGI config for the project.
+
+It exposes the WSGI callable as a module-level variable named `application`.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/3.2/howto/deployment/wsgi/
+"""
+
+import os
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+
+application = get_wsgi_application()
+</content></file><file><path>config\__init__.py</path><content /></file></repository>
 
 --- script.py ---
 import os
@@ -153,6 +488,191 @@ if __name__ == "__main__":
     main()
 
 
+--- wait-for-it.sh ---
+#!/usr/bin/env bash
+# Use this script to test if a given TCP host/port are available
+
+WAITFORIT_cmdname=${0##*/}
+
+echoerr() { if [[ $WAITFORIT_QUIET -ne 1 ]]; then echo "$@" 1>&2; fi }
+
+usage()
+{
+    cat << USAGE >&2
+Usage:
+    $WAITFORIT_cmdname host:port [-s] [-t timeout] [-- command args]
+    -h HOST | --host=HOST       Host or IP under test
+    -p PORT | --port=PORT       TCP port under test
+                                Alternatively, you specify the host and port as host:port
+    -s | --strict               Only execute subcommand if the test succeeds
+    -q | --quiet                Don't output any status messages
+    -t TIMEOUT | --timeout=TIMEOUT
+                                Timeout in seconds, zero for no timeout
+    -- COMMAND ARGS             Execute command with args after the test finishes
+USAGE
+    exit 1
+}
+
+wait_for()
+{
+    if [[ $WAITFORIT_TIMEOUT -gt 0 ]]; then
+        echoerr "$WAITFORIT_cmdname: waiting $WAITFORIT_TIMEOUT seconds for $WAITFORIT_HOST:$WAITFORIT_PORT"
+    else
+        echoerr "$WAITFORIT_cmdname: waiting for $WAITFORIT_HOST:$WAITFORIT_PORT without a timeout"
+    fi
+    WAITFORIT_start_ts=$(date +%s)
+    while :
+    do
+        if [[ $WAITFORIT_ISBUSY -eq 1 ]]; then
+            nc -z $WAITFORIT_HOST $WAITFORIT_PORT
+            WAITFORIT_result=$?
+        else
+            (echo -n > /dev/tcp/$WAITFORIT_HOST/$WAITFORIT_PORT) >/dev/null 2>&1
+            WAITFORIT_result=$?
+        fi
+        if [[ $WAITFORIT_result -eq 0 ]]; then
+            WAITFORIT_end_ts=$(date +%s)
+            echoerr "$WAITFORIT_cmdname: $WAITFORIT_HOST:$WAITFORIT_PORT is available after $((WAITFORIT_end_ts - WAITFORIT_start_ts)) seconds"
+            break
+        fi
+        sleep 1
+    done
+    return $WAITFORIT_result
+}
+
+wait_for_wrapper()
+{
+    # In order to support SIGINT during timeout: http://unix.stackexchange.com/a/57692
+    if [[ $WAITFORIT_QUIET -eq 1 ]]; then
+        timeout $WAITFORIT_BUSYTIMEFLAG $WAITFORIT_TIMEOUT $0 --quiet --child --host=$WAITFORIT_HOST --port=$WAITFORIT_PORT --timeout=$WAITFORIT_TIMEOUT &
+    else
+        timeout $WAITFORIT_BUSYTIMEFLAG $WAITFORIT_TIMEOUT $0 --child --host=$WAITFORIT_HOST --port=$WAITFORIT_PORT --timeout=$WAITFORIT_TIMEOUT &
+    fi
+    WAITFORIT_PID=$!
+    trap "kill -INT -$WAITFORIT_PID" INT
+    wait $WAITFORIT_PID
+    WAITFORIT_RESULT=$?
+    if [[ $WAITFORIT_RESULT -ne 0 ]]; then
+        echoerr "$WAITFORIT_cmdname: timeout occurred after waiting $WAITFORIT_TIMEOUT seconds for $WAITFORIT_HOST:$WAITFORIT_PORT"
+    fi
+    return $WAITFORIT_RESULT
+}
+
+# process arguments
+while [[ $# -gt 0 ]]
+do
+    case "$1" in
+        *:* )
+        WAITFORIT_hostport=(${1//:/ })
+        WAITFORIT_HOST=${WAITFORIT_hostport[0]}
+        WAITFORIT_PORT=${WAITFORIT_hostport[1]}
+        shift 1
+        ;;
+        --child)
+        WAITFORIT_CHILD=1
+        shift 1
+        ;;
+        -q | --quiet)
+        WAITFORIT_QUIET=1
+        shift 1
+        ;;
+        -s | --strict)
+        WAITFORIT_STRICT=1
+        shift 1
+        ;;
+        -h)
+        WAITFORIT_HOST="$2"
+        if [[ $WAITFORIT_HOST == "" ]]; then break; fi
+        shift 2
+        ;;
+        --host=*)
+        WAITFORIT_HOST="${1#*=}"
+        shift 1
+        ;;
+        -p)
+        WAITFORIT_PORT="$2"
+        if [[ $WAITFORIT_PORT == "" ]]; then break; fi
+        shift 2
+        ;;
+        --port=*)
+        WAITFORIT_PORT="${1#*=}"
+        shift 1
+        ;;
+        -t)
+        WAITFORIT_TIMEOUT="$2"
+        if [[ $WAITFORIT_TIMEOUT == "" ]]; then break; fi
+        shift 2
+        ;;
+        --timeout=*)
+        WAITFORIT_TIMEOUT="${1#*=}"
+        shift 1
+        ;;
+        --)
+        shift
+        WAITFORIT_CLI=("$@")
+        break
+        ;;
+        --help)
+        usage
+        ;;
+        *)
+        echoerr "Unknown argument: $1"
+        usage
+        ;;
+    esac
+done
+
+if [[ "$WAITFORIT_HOST" == "" || "$WAITFORIT_PORT" == "" ]]; then
+    echoerr "Error: you need to provide a host and port to test."
+    usage
+fi
+
+WAITFORIT_TIMEOUT=${WAITFORIT_TIMEOUT:-15}
+WAITFORIT_STRICT=${WAITFORIT_STRICT:-0}
+WAITFORIT_CHILD=${WAITFORIT_CHILD:-0}
+WAITFORIT_QUIET=${WAITFORIT_QUIET:-0}
+
+# Check to see if timeout is from busybox?
+WAITFORIT_TIMEOUT_PATH=$(type -p timeout)
+WAITFORIT_TIMEOUT_PATH=$(realpath $WAITFORIT_TIMEOUT_PATH 2>/dev/null || readlink -f $WAITFORIT_TIMEOUT_PATH)
+
+WAITFORIT_BUSYTIMEFLAG=""
+if [[ $WAITFORIT_TIMEOUT_PATH =~ "busybox" ]]; then
+    WAITFORIT_ISBUSY=1
+    # Check if busybox timeout uses -t flag
+    # (recent Alpine versions don't support -t anymore)
+    if timeout &>/dev/stdout | grep -q -e '-t '; then
+        WAITFORIT_BUSYTIMEFLAG="-t"
+    fi
+else
+    WAITFORIT_ISBUSY=0
+fi
+
+if [[ $WAITFORIT_CHILD -gt 0 ]]; then
+    wait_for
+    WAITFORIT_RESULT=$?
+    exit $WAITFORIT_RESULT
+else
+    if [[ $WAITFORIT_TIMEOUT -gt 0 ]]; then
+        wait_for_wrapper
+        WAITFORIT_RESULT=$?
+    else
+        wait_for
+        WAITFORIT_RESULT=$?
+    fi
+fi
+
+if [[ $WAITFORIT_CLI != "" ]]; then
+    if [[ $WAITFORIT_RESULT -ne 0 && $WAITFORIT_STRICT -eq 1 ]]; then
+        echoerr "$WAITFORIT_cmdname: strict mode, refusing to execute subprocess"
+        exit $WAITFORIT_RESULT
+    fi
+    exec "${WAITFORIT_CLI[@]}"
+else
+    exit $WAITFORIT_RESULT
+fi
+
+
 --- .github\workflows\python-ci.yml ---
 name: Python CI
 
@@ -200,9 +720,11 @@ jobs:
 
 --- apps\example_app\admin.py ---
 from django.contrib import admin
-from .models import ExampleModel
+from .models import UserProfile, Message  # Import the correct models
 
-admin.site.register(ExampleModel)
+# Register the models with the admin site
+admin.site.register(UserProfile)
+admin.site.register(Message)
 
 
 --- apps\example_app\apps.py ---
@@ -216,30 +738,129 @@ class ExampleAppConfig(AppConfig):
 --- apps\example_app\models.py ---
 from django.db import models
 
-class ExampleModel(models.Model):
-    name = models.CharField(max_length=100)
+class UserProfile(models.Model):
+    user = models.OneToOneField('auth.User', on_delete=models.CASCADE)
+    bio = models.TextField()
 
     def __str__(self):
-        return self.name
+        return self.user.username
+
+class Message(models.Model):
+    sender = models.ForeignKey('auth.User', related_name='sent_messages', on_delete=models.CASCADE)
+    recipient = models.ForeignKey('auth.User', related_name='received_messages', on_delete=models.CASCADE)
+    content = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Message from {self.sender} to {self.recipient}"
+
+
+--- apps\example_app\serializers.py ---
+from rest_framework import serializers
+from .models import UserProfile, Message
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['user', 'bio']
+
+class MessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Message
+        fields = ['sender', 'recipient', 'content', 'timestamp']
 
 
 --- apps\example_app\urls.py ---
-from django.urls import path
-from .views import example_view
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import UserProfileViewSet, MessageViewSet
 
-urlpatterns = [
-    path('example/', example_view),
-]
+router = DefaultRouter()
+router.register(r'userprofiles', UserProfileViewSet)
+router.register(r'messages', MessageViewSet)
+
+urlpatterns = router.urls  # Use router.urls directly
 
 
 --- apps\example_app\views.py ---
-from django.http import JsonResponse
+from rest_framework import viewsets
+from .models import UserProfile, Message
+from .serializers import UserProfileSerializer, MessageSerializer
 
-def example_view(request):
-    return JsonResponse({'message': 'Hello, world!'})
+class UserProfileViewSet(viewsets.ModelViewSet):
+    queryset = UserProfile.objects.all()
+    serializer_class = UserProfileSerializer
+
+class MessageViewSet(viewsets.ModelViewSet):
+    queryset = Message.objects.all()
+    serializer_class = MessageSerializer
 
 
 --- apps\example_app\__init__.py ---
+
+
+--- apps\example_app\management\__init__.py ---
+
+
+--- apps\example_app\management\commands\load_initial_data.py ---
+from django.core.management.base import BaseCommand
+from apps.example_app.models import UserProfile, Message
+
+class Command(BaseCommand):
+    help = 'Load initial test data into the database'
+
+    def handle(self, *args, **kwargs):
+        UserProfile.objects.create(username='john_doe', email='john@example.com', bio='Software Developer')
+        UserProfile.objects.create(username='jane_doe', email='jane@example.com', bio='Data Scientist')
+
+        Message.objects.create(sender_id=1, recipient_id=2, content='Hello, Jane!')
+        Message.objects.create(sender_id=2, recipient_id=1, content='Hello, John!')
+
+        self.stdout.write(self.style.SUCCESS('Initial data loaded successfully'))
+
+
+--- apps\example_app\management\commands\__init__.py ---
+
+
+--- apps\example_app\migrations\0001_initial.py ---
+# Generated by Django 3.2.25 on 2024-09-02 23:41
+
+from django.conf import settings
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='UserProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('bio', models.TextField()),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Message',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('content', models.TextField()),
+                ('timestamp', models.DateTimeField(auto_now_add=True)),
+                ('recipient', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='received_messages', to=settings.AUTH_USER_MODEL)),
+                ('sender', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='sent_messages', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+    ]
+
+
+--- apps\example_app\migrations\__init__.py ---
 
 
 --- config\asgi.py ---
@@ -262,7 +883,9 @@ application = get_asgi_application()
 
 --- config\settings.py ---
 import os
+import time
 from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -286,9 +909,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'apps.example_app',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -319,40 +944,75 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database configuration using environment variables
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'default_db_name'),
-        'USER': os.getenv('POSTGRES_USER', 'default_user'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'default_password'),
-        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
-        'PORT': os.getenv('POSTGRES_PORT', '5432'),
-    },
-    'mongo': {
-        'ENGINE': 'djongo',
-        'NAME': 'my_mongo_db',
-        'ENFORCE_SCHEMA': False,
-        'CLIENT': {
-            'host': os.getenv('MONGO_HOST', 'localhost'),
-            'port': int(os.getenv('MONGO_PORT', '27017')),
-        },
+DATABASE_ENGINE = os.getenv('DJANGO_DB', 'postgres')
+
+if DATABASE_ENGINE == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', 'default_db_name'),
+            'USER': os.getenv('POSTGRES_USER', 'default_user'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'default_password'),
+            'HOST': os.getenv('POSTGRES_HOST', 'postgres'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
     }
-}
+elif DATABASE_ENGINE == 'mongo':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'djongo',
+            'NAME': 'my_mongo_db',
+            'ENFORCE_SCHEMA': False,
+            'CLIENT': {
+                'host': os.getenv('MONGO_HOST', 'localhost'),
+                'port': int(os.getenv('MONGO_PORT', '27017')),
+            },
+        }
+    }
+else:
+    raise ImproperlyConfigured("DATABASE_ENGINE is not correctly configured.")
+
+# Retry mechanism for database connection
+max_retries = 5
+retry_delay = 5  # seconds
+
+for i in range(max_retries):
+    try:
+        from django.db import connections
+        connection = connections['default']
+        connection.ensure_connection()
+        break  # If connection is successful, exit the loop
+    except Exception as e:
+        if i < max_retries - 1:
+            print(f"Database connection failed: {e}. Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
+        else:
+            raise Exception("Maximum retry limit reached. Could not connect to the database.") from e
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# CORS configuration
+CORS_ALLOW_ALL_ORIGINS = True
+
 
 
 --- config\urls.py ---
 from django.contrib import admin
 from django.urls import path, include
+from django.http import HttpResponse
+
+def home_view(request):
+    return HttpResponse("Welcome to the Home Page")
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('apps.example_app.urls')),
+    path('', home_view),
 ]
 
 
@@ -382,15 +1042,23 @@ application = get_wsgi_application()
 convert_file.py
 Dockerfile
 manage.py
+repo-content.xml
 script.py
+wait-for-it.sh
 .github\workflows\python-ci.yml
 apps\__init__.py
 apps\example_app\admin.py
 apps\example_app\apps.py
 apps\example_app\models.py
+apps\example_app\serializers.py
 apps\example_app\urls.py
 apps\example_app\views.py
 apps\example_app\__init__.py
+apps\example_app\management\__init__.py
+apps\example_app\management\commands\load_initial_data.py
+apps\example_app\management\commands\__init__.py
+apps\example_app\migrations\0001_initial.py
+apps\example_app\migrations\__init__.py
 config\asgi.py
 config\settings.py
 config\urls.py
